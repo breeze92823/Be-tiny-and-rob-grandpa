@@ -117,6 +117,8 @@ export function createBrain({ grandpa, house, hooks }) {
     const dz = bz - az
     const len = Math.hypot(dx, dz)
     if (len < 0.5) return true
+    // the open secret bookshelf is kinematic (the static-only rays below miss it): never cut through it
+    if (house.secret?.blocks?.(ax, az, bx, bz, R)) return false
     const nx = -dz / len
     const nz = dx / len
     for (const off of [0, R * 0.85, -R * 0.85]) {
