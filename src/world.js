@@ -1,56 +1,7 @@
-import {
-  ExtrudeGeometry,
-  Group,
-  IcosahedronGeometry,
-  Mesh,
-  MeshLambertMaterial,
-  MeshPhysicalMaterial,
-  MeshStandardMaterial,
-  PlaneGeometry,
-  Shape,
-  ShapeGeometry,
-  Vector2,
-} from 'three'
-import { BEACH, WATER } from './config.js'
-import { RAPIER, addFixed } from './physics.js'
-import { mulberry32, paintCrackedSand, paintWaterNormal, toTexture } from './textures.js'
-
-// The ground: a pale cracked-sand slab in a bright cartoon sea, with puffy
-// clouds in the sky. Physically the land is one convex-hull collider plus an
-// invisible fence on every edge (landColliders).
-//
-// Texture techniques used here:
-//  - sand: tileable Voronoi cells + cracks -> colour + derived normal map,
-//    world-space UVs (ExtrudeGeometry caps use shape coordinates = metres)
-//  - sea: one ripple normal map used twice (normalMap + clearcoatNormalMap) at
-//    different scales, scrolled in different directions each frame, over a
-//    lighter shallow-water band hugging the shore
-
-// Outline of the land in world (x, z), counter-clockwise seen from above. Convex.
-export function beachOutline() {
-  const { front, back, halfWidth: W, wingZ, gateEdge } = BEACH
-  return [
-    [-W, back],
-    [W, back],
-    [W, wingZ],
-    [gateEdge, front],
-    [-gateEdge, front],
-    [-W, wingZ],
-  ]
-}
-
-// Shape space is (x, -z): rotating the extrusion -90 deg about X maps shape y to world -z and depth to +y.
-function outlineShape(points, scale = 1, cz = 0) {
-  const s = new Shape()
-  points.forEach(([x, z], i) => {
-    const sx = x * scale
-    const sz = cz + (z - cz) * scale
-    if (i === 0) s.moveTo(sx, -sz)
-    else s.lineTo(sx, -sz)
-  })
-  s.closePath()
-  return s
-}
+// The sky's puffy clouds (the ground is the yard in game/house.js and the hideout in game/lobby.js).
+import { Group, IcosahedronGeometry, Mesh, MeshLambertMaterial } from 'three'
+import { mulberry32 } from './textures.js'
+import { bake } from './bake.js'
 
 function makeClouds() {
   const rand = mulberry32(2024)
@@ -75,9 +26,11 @@ function makeClouds() {
     const flat = new Mesh(geo, mat) // flat underside
     flat.scale.set(len * 0.62, 4, 9)
     cloud.add(flat)
-    cloud.position.set(Math.cos(ang) * dist, 30 + rand() * 70, Math.sin(ang) * dist)
-    cloud.lookAt(0, cloud.position.y, 0)
-    group.add(cloud)
+    // Each cloud is static: its 6-9 puffs bake into one mesh (one draw call, still culled per cloud).
+    const baked = bake(cloud)
+    baked.position.set(Math.cos(ang) * dist, 30 + rand() * 70, Math.sin(ang) * dist)
+    baked.lookAt(0, baked.position.y, 0)
+    group.add(baked)
   }
   return group
 }
@@ -138,39 +91,12 @@ export function landColliders() {
   }
 }
 
-// The sea around the land and the clouds in the sky.
+// The clouds in the sky (the ground is the yard in game/house.js and the hideout in game/lobby.js).
 export function createWorld(scene) {
-  // Sea: physical material, two scrolling ripple layers, slightly see-through.
-  const ripples = paintWaterNormal()
-  const normalA = toTexture(ripples, { repeat: WATER.size / 14 })
-  const normalB = toTexture(ripples, { repeat: WATER.size / 37 })
-  const sea = new Mesh(
-    new PlaneGeometry(WATER.size, WATER.size),
-    new MeshPhysicalMaterial({
-      color: WATER.color,
-      roughness: 0.3,
-      metalness: 0,
-      normalMap: normalA,
-      normalScale: new Vector2(0.3, 0.3),
-      clearcoat: 1,
-      clearcoatRoughness: 0.08,
-      clearcoatNormalMap: normalB,
-      clearcoatNormalScale: new Vector2(0.5, 0.5),
-      transparent: true,
-      opacity: 0.94,
-    }),
-  )
-  sea.rotation.x = -Math.PI / 2
-  sea.position.y = WATER.level
-  sea.receiveShadow = true
-  scene.add(sea, makeClouds())
-
+  const clouds = makeClouds()
+  clouds.position.y += 60
+  scene.add(clouds)
   return {
-    setSeaColor: (color) => sea.material.color.set(color),
-    update(dt, elapsed) {
-      // One ripple tile is 14 m (A) / 37 m (B); v runs toward -Z.
-      normalA.offset.set(elapsed * 0.012, elapsed * 0.02)
-      normalB.offset.set(-elapsed * 0.008, elapsed * 0.005)
-    },
+    update() {},
   }
 }

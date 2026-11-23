@@ -32,6 +32,31 @@ function button(className, html, fn) {
   return b
 }
 
+// A button that is "on" while a finger stays on it (GRAB).
+function holdButton(className, html, fn) {
+  const b = el('button', `touch-btn ${className}`, html)
+  b.type = 'button'
+  const up = (e) => {
+    e.preventDefault()
+    b.classList.remove('on')
+    fn(false)
+  }
+  b.addEventListener('pointerdown', (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    try {
+      b.setPointerCapture(e.pointerId)
+    } catch {
+      // Ignore.
+    }
+    b.classList.add('on')
+    fn(true)
+  })
+  b.addEventListener('pointerup', up)
+  b.addEventListener('pointercancel', up)
+  return b
+}
+
 const isFinger = (e) => e.pointerType === 'touch' || e.pointerType === 'pen'
 
 // Keeps a finger's moves on its zone even when it slides off. Throws if the
@@ -151,10 +176,7 @@ export function installTouch(actions) {
   installLook(right)
 
   const top = el('div', 'touch-top')
-  top.append(
-    button('small', ICONS.day, actions.day),
-    button('small', ICONS.respawn, actions.respawn),
-  )
+  top.append(button('small', ICONS.respawn, actions.respawn))
 
   let sprinting = false
   const cluster = el('div', 'touch-cluster')
@@ -167,6 +189,17 @@ export function installTouch(actions) {
     }),
     button('jump', 'JUMP', () => {
       inputState.jump = true
+      inputState.struggle++
+    }),
+    button('crouch', 'DUCK', (b) => {
+      inputState.crouch = !inputState.crouch
+      b.classList.toggle('on', inputState.crouch)
+    }),
+    holdButton('grab', 'GRAB', (on) => {
+      inputState.grab = on
+    }),
+    button('throw', 'THROW', () => {
+      inputState.throw = true
     }),
   )
 

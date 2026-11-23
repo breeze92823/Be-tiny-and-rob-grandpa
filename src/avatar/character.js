@@ -157,3 +157,38 @@ export async function loadBaseCharacter() {
     return buildDefaultCharacter()
   }
 }
+
+// A player's uploaded character (Bloxity custom characters): a different skeleton from player.glb (its own
+// joint positions) but the same bone names, so the animator, emotes and body poses drive it unchanged. Its
+// texture is embedded; no skin, body parts or proportions apply. Each glbUrl is downloaded once and cloned
+// per player. Resolves null when it cannot be loaded: the caller draws the regular avatar instead (a player
+// is never hidden).
+const customCache = new Map() // glbUrl -> Promise<gltf>
+export async function loadCustomCharacter(glbUrl) {
+  try {
+    if (!customCache.has(glbUrl)) customCache.set(glbUrl, new GLTFLoader().loadAsync(glbUrl))
+    const gltf = await customCache.get(glbUrl)
+    const root = cloneSkeleton(gltf.scene)
+    root.name = 'character'
+    root.traverse((o) => {
+      if (o.isMesh || o.isSkinnedMesh) {
+        o.castShadow = true
+        o.frustumCulled = false
+      }
+    })
+    root.animations = gltf.animations || []
+    root.nodes = {}
+    root.traverse((o) => {
+      if (o.name) root.nodes[o.name] = o
+    })
+    // The same bones the animator needs, or it is not a usable rig.
+    if (!root.nodes.Rig1 || !root.nodes.Spine1 || !root.nodes.Neck1) throw new Error('missing bones')
+    root.userData.customCharacter = true
+    root.scale.setScalar(PLAYER_DIMS.height / RIG_HEIGHT) // player.glb's units: a short / tall character keeps its height
+    return root
+  } catch (err) {
+    customCache.delete(glbUrl)
+    console.warn('[customCharacter] could not load', glbUrl, err)
+    return null
+  }
+}
