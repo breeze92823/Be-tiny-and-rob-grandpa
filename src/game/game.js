@@ -36,7 +36,7 @@ import { thumbnail, warmThumbnail } from './models/thumbs.js'
 import { makeBananaPeel, makeFoamRocket, makeGadget, makeMarble } from './models/gadgets.js'
 import { makeLoot } from './models/loot.js'
 import { infoLabel, rng } from './kit.js'
-import { net, onNet, readPads, sendNet, serverNow, verifyAdReward } from '../net.js'
+import { net, onNet, readHeist, readPads, sendNet, serverNow, verifyAdReward } from '../net.js'
 import * as bloxity from '../bloxity.js'
 
 const FLOOR_SOUND = { tile: 'tile', wood: 'wood', carpet: 'carpet', stone: 'stone' }
@@ -168,7 +168,7 @@ export function createGame({ scene, camera, renderer, preset, setLightEffects })
   // --- Heist state ---------------------------------------------------------------------------------
   const H = {
     mode: 'lobby', // lobby | loading | heist | results
-    pad: -1,
+    heistId: '', // the running heist's server id (its zone is `h<heistId>`); '' = none / offline solo
     difficulty: 'normal',
     target: 1000,
     money: 0, // offline / solo bank
@@ -201,8 +201,7 @@ export function createGame({ scene, camera, renderer, preset, setLightEffects })
   const isOnline = () => net.connected && !H.solo
   const crewMoney = () => {
     if (H.solo || !net.connected) return H.money
-    const pads = readPads()
-    return pads?.[H.pad]?.money ?? H.money
+    return readHeist(H.heistId)?.money ?? H.money
   }
 
   // --- Props / brain / grab / gadgets / jobs -----------------------------------------------------------
@@ -1154,7 +1153,7 @@ export function createGame({ scene, camera, renderer, preset, setLightEffects })
     if (!isOnline()) return []
     const out = []
     net.players?.forEach((p, id) => {
-      if (id !== net.sessionId && p.zone === `h${H.pad}` && !p.out) out.push(id)
+      if (id !== net.sessionId && p.zone === `h${H.heistId}` && !p.out) out.push(id)
     })
     return out
   }
@@ -1210,7 +1209,7 @@ export function createGame({ scene, camera, renderer, preset, setLightEffects })
   function startHeist(info) {
     hud.loading(false)
     H.mode = 'heist'
-    H.pad = info.pad
+    H.heistId = info.heistId ?? ''
     H.seed = info.seed >>> 0
     H.difficulty = info.difficulty ?? 'normal'
     H.target = info.target ?? DIFFICULTY[H.difficulty].target
@@ -1333,7 +1332,7 @@ export function createGame({ scene, camera, renderer, preset, setLightEffects })
     syncYawToPlayer()
     hud.setMode('lobby')
     music.setMood('lobby')
-    H.pad = -1
+    H.heistId = ''
     lobbyPad = -1
     offline.pad = -1
   }
@@ -1514,7 +1513,8 @@ export function createGame({ scene, camera, renderer, preset, setLightEffects })
     lobbyPad = -1
   }
   // `mine` = the server lists this player on the pad, `full` = no seat left. The server answers a
-  // joinPad onto a running or full pad with nothing at all, so the pad state is the only answer.
+  // joinPad onto a full pad with nothing at all, so the pad state is the only answer. A pad is free again
+  // the moment its crew launches (the heist is its own server object), so there is no 'heist in progress'.
   function padViews() {
     const pads = readPads()
     if (pads) {
@@ -1522,7 +1522,6 @@ export function createGame({ scene, camera, renderer, preset, setLightEffects })
         count: p.members.length,
         names: p.members.map((m) => m.name),
         seconds: p.startsAt ? Math.max(0, Math.ceil((p.startsAt - serverNow()) / 1000)) : 0,
-        running: p.running,
         mine: p.members.some((m) => m.id === net.sessionId),
         full: p.members.length >= LOBBY.padSize,
       }))
@@ -1531,7 +1530,6 @@ export function createGame({ scene, camera, renderer, preset, setLightEffects })
       count: offline.pad === i ? 1 : 0,
       names: offline.pad === i ? ['You'] : [],
       seconds: offline.pad === i ? Math.max(0, Math.ceil((offline.startsAt - Date.now()) / 1000)) : 0,
-      running: false,
       mine: offline.pad === i,
       full: false,
     }))
@@ -1556,9 +1554,9 @@ export function createGame({ scene, camera, renderer, preset, setLightEffects })
     lobby.update(dt, views, lobbyPad)
     if (lobbyPad >= 0) {
       const v = views[lobbyPad]
-      // Standing on a pad the server has not seated us on: say why ('running' / 'full', else 'joining'),
-      // and ask again as soon as it has room (a heist ended, someone stepped off), at most once a second.
-      const seat = net.connected && !v.mine ? (v.running ? 'running' : v.full ? 'full' : 'joining') : ''
+      // Standing on a pad the server has not seated us on: say why ('full', else 'joining'),
+      // and ask again as soon as it has room (someone stepped off or the crew launched), at most once a second.
+      const seat = net.connected && !v.mine ? (v.full ? 'full' : 'joining') : ''
       if (seat === 'joining' && performance.now() - lastJoinTry > 1000) {
         lastJoinTry = performance.now()
         sendNet('joinPad', { pad: lobbyPad })
@@ -1589,10 +1587,10 @@ export function createGame({ scene, camera, renderer, preset, setLightEffects })
   onNet('heistStart', (m) => {
     if (H.mode !== 'lobby') return
     lobbyPad = -1
-    beginHeist({ pad: m.pad, seed: m.seed, difficulty: m.difficulty, target: m.target, host: m.host, crew: m.crew, solo: false })
+    beginHeist({ heistId: m.heistId, seed: m.seed, difficulty: m.difficulty, target: m.target, host: m.host, crew: m.crew, solo: false })
   })
   onNet('hostChanged', (m) => {
-    if (H.mode !== 'heist' || m.pad !== H.pad) return
+    if (H.mode !== 'heist' || m.heistId !== H.heistId) return
     H.host = m.host
     const mine = m.host === myId()
     if (mine && !H.authority) {
@@ -1920,7 +1918,7 @@ export function createGame({ scene, camera, renderer, preset, setLightEffects })
     list.push(localThief)
     if (isOnline()) {
       net.players?.forEach((rp, id) => {
-        if (id === net.sessionId || rp.zone !== `h${H.pad}`) return
+        if (id === net.sessionId || rp.zone !== `h${H.heistId}`) return
         let t = remoteThieves.get(id)
         if (!t) remoteThieves.set(id, (t = { id, pos: new Vector3(), height: 1.8, stealth: 1, visible: true }))
         t.pos.set(rp.x, rp.y, rp.z)
@@ -2134,7 +2132,7 @@ export function createGame({ scene, camera, renderer, preset, setLightEffects })
       return hud.panelOpen
     },
     get zone() {
-      return H.mode === 'heist' || H.mode === 'results' ? `h${H.pad}` : 'lobby'
+      return H.mode === 'heist' || H.mode === 'results' ? `h${H.heistId}` : 'lobby'
     },
     get inHeist() {
       return H.mode === 'heist'
@@ -2214,7 +2212,7 @@ export function createGame({ scene, camera, renderer, preset, setLightEffects })
       fire,
       start: (difficulty = 'normal', tutorial = false) => {
         if (!tutorial) state.data.tutorialDone = true
-        beginHeist({ pad: 0, seed: (Math.random() * 2 ** 32) >>> 0, difficulty, target: DIFFICULTY[difficulty].target, host: 'me', crew: ['me'], solo: true })
+        beginHeist({ seed: (Math.random() * 2 ** 32) >>> 0, difficulty, target: DIFFICULTY[difficulty].target, host: 'me', crew: ['me'], solo: true })
       },
       money: (n) => addMoney(n),
       coins: (n) => state.earn(n),

@@ -116,21 +116,22 @@ hears noise events (radius, muffled through walls), investigate, chase, search, 
 not under furniture), carry to cage. Reacts to traps (slip, stuck, sleep, stunned, distracted).
 
 ## Multiplayer protocol (Colyseus room `world`, max 16) — backend + client src/net.js
-State `WorldState { players: Map<sid, PlayerState>, pads: ArraySchema<PadState>(3) }`.
+State `WorldState { players: Map<sid, PlayerState>, pads: ArraySchema<PadState>(3), heists: ArraySchema<HeistState> }`.
 `PlayerState`: username, signedIn, pfp, userId, avatar, emote, x y z yaw speed grounded (pose),
 `crouch` bool, `grab` bool, `gx gy gz` (grab point, drawn as stretchy arms), `zone` string ("lobby"
-or "h0".."h2", set by the server only), `held` bool (in Grandpa's hand), `out` bool, `escapes` number.
+or "h<heistId>", set by the server only), `held` bool (in Grandpa's hand), `out` bool, `escapes` number.
 `PadState`: index, difficulty, `members` ArraySchema<string> (waiting on the pad), `startsAt`
-(server epoch ms, 0 = idle), `running` bool, `crew` ArraySchema<string> (in the heist), `host`
-(sessionId running Grandpa + physics), `seed` uint32, `money`, `target`, `heistId` string.
-Client -> server: `joinPad {pad}` (no reply: a running / full pad silently takes nobody, so the client
-checks `members` / `running` and re-sends), `leavePad`, `pose {...}`, `setAvatar`, `emote`,
+(server epoch ms, 0 = idle); a pad is free again as soon as its crew launches. `HeistState`: `id`,
+`pad`, difficulty, `crew` ArraySchema<string> (in the heist), `host` (sessionId running Grandpa +
+physics), `seed` uint32, `money`, `target`.
+Client -> server: `joinPad {pad}` (no reply: a full pad silently takes nobody, so the client
+checks `members` and re-sends), `leavePad`, `pose {...}`, `setAvatar`, `emote`,
 `saveProgress`, `identify {token, username, pfp}`, `adReward {token, placement}`, `hs` (host snapshot,
 relayed to the crew except the sender, only from the host),
 `ha` (crew action, relayed to the host with `from` = sender sid), `hb` (host event, relayed to the
 whole crew except the sender), `steal {value}` (host only: money += clamp), `escaped` (member left
 the heist through the van), `leaveHeist` (back to the lobby). Server -> client: `heistStart {pad,
-heistId, seed, difficulty, target, host, crew}`, `hostChanged {pad, host}`, `heistOver {pad}`,
+heistId, seed, difficulty, target, host, crew}`, `hostChanged {heistId, host}`, `heistOver {heistId, pad}`,
 relayed `hs` / `ha` / `hb`, plus the template's `progress` / `noProgress` (both carry `serverTime`, the
 server epoch ms the pads' `startsAt` is read against) / `serverError` / `leaderboard` / `adRewardResult
 {ok, placement}`.
