@@ -196,7 +196,7 @@ const RELAYED = ['heistStart', 'hostChanged', 'heistOver', 'hs', 'ha', 'hb', 'le
 export function sendNet(type, payload = {}) {
   if (net.connected) send(type, payload)
 }
-// The pads as the lobby draws them: [{ index, difficulty, members: [{ id, name }], startsAt, running, crew, host, money, target, seed, heistId }]
+// The pads as the lobby draws them: [{ index, difficulty, members: [{ id, name }], startsAt }]
 export function readPads() {
   const pads = net.connected ? net.room?.state?.pads : null
   if (!pads) return null
@@ -209,16 +209,19 @@ export function readPads() {
       difficulty: p.difficulty,
       members: [...p.members].map((id) => ({ id, name: name(id) })),
       startsAt: p.startsAt,
-      running: p.running,
-      crew: [...p.crew].map((id) => ({ id, name: name(id) })),
-      host: p.host,
-      money: p.money,
-      target: p.target,
-      seed: p.seed,
-      heistId: p.heistId,
     })
   })
   return out
+}
+// The running heist with this id (null = unknown / over): { id, pad, difficulty, crew, host, money, target, seed }.
+export function readHeist(id) {
+  const heists = net.connected ? net.room?.state?.heists : null
+  if (!heists || !id) return null
+  let found = null
+  heists.forEach((h) => {
+    if (h.id === id) found = { id: h.id, pad: h.pad, difficulty: h.difficulty, crew: [...h.crew], host: h.host, money: h.money, target: h.target, seed: h.seed }
+  })
+  return found
 }
 
 // --- Rewarded ads ----------------------------------------------------------------

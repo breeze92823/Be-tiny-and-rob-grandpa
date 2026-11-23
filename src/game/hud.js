@@ -35,7 +35,7 @@ const UPG_ICON = {
   arm: '💪', fist: '✊', lungs: '🫁', shoe: '👟', sock: '🧦', mask: '🥷',
 }
 // What the pad panel says while the server has not seated you on the pad (game.js `seat`).
-const PAD_SEAT = { running: 'HEIST IN PROGRESS', full: 'CREW FULL', joining: 'JOINING...' }
+const PAD_SEAT = { full: 'CREW FULL', joining: 'JOINING...' }
 
 function h(tag, cls = '', html = '') {
   const e = document.createElement(tag)

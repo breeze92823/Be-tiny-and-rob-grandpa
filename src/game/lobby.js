@@ -160,12 +160,11 @@ export function buildLobby(scene) {
     sign.mesh.position.set(p.x, s(10.5), p.z)
     live.add(sign.mesh)
     cyl(g, s(0.25), s(0.25), s(8), metal('#c9ccd2', 0.4), p.x, s(4), p.z - s(0.6), { seg: 8 })
-    const label = { count: -1, seconds: -1, running: null }
-    const paint = (count, seconds, running) => {
-      if (label.count === count && label.seconds === seconds && label.running === running) return
+    const label = { count: -1, seconds: -1 }
+    const paint = (count, seconds) => {
+      if (label.count === count && label.seconds === seconds) return
       label.count = count
       label.seconds = seconds
-      label.running = running
       sign.setDraw((c, w, h) => {
         c.fillStyle = 'rgba(16,18,40,0.92)'
         roundRect(c, 4, 4, w - 8, h - 8, 26)
@@ -174,16 +173,11 @@ export function buildLobby(scene) {
         c.strokeStyle = d.color
         c.stroke()
         outlinedText(c, d.label, w / 2, 48, 46, d.color)
-        if (running) {
-          outlinedText(c, 'HEIST IN', w / 2, 108, 36, '#ffffff')
-          outlinedText(c, 'PROGRESS', w / 2, 150, 36, '#ffd23f')
-        } else {
-          outlinedText(c, `${count}/${LOBBY.padSize} THIEVES`, w / 2, 110, 38, '#ffffff')
-          outlinedText(c, seconds > 0 ? `STARTING: ${seconds}s` : 'JOIN TO PLAY', w / 2, 158, 34, seconds > 0 ? '#9dff9d' : '#ffd23f')
-        }
+        outlinedText(c, `${count}/${LOBBY.padSize} THIEVES`, w / 2, 110, 38, '#ffffff')
+        outlinedText(c, seconds > 0 ? `STARTING: ${seconds}s` : 'JOIN TO PLAY', w / 2, 158, 34, seconds > 0 ? '#9dff9d' : '#ffd23f')
       })
     }
-    paint(0, 0, false)
+    paint(0, 0)
     return { ...p, index: i, ring, sign, paint, d }
   })
 
@@ -281,9 +275,9 @@ export function buildLobby(scene) {
       candle.intensity = candleBase * (1 + Math.sin(t * 11) * 0.09 + Math.sin(t * 23) * 0.055)
       bulbs.forEach((b, i) => (b.material.emissiveIntensity = 1.6 + Math.sin(t * 2 + i) * 0.8))
       pads.forEach((pad, i) => {
-        const v = padViews?.[i] ?? { count: 0, seconds: 0, running: false }
-        pad.paint(v.count, v.seconds, v.running)
-        pad.ring.material.opacity = v.running ? 0.15 : 0.45 + Math.sin(t * 3 + i) * 0.2 + (myPad === i ? 0.3 : 0)
+        const v = padViews?.[i] ?? { count: 0, seconds: 0 }
+        pad.paint(v.count, v.seconds)
+        pad.ring.material.opacity = 0.45 + Math.sin(t * 3 + i) * 0.2 + (myPad === i ? 0.3 : 0)
       })
       storeZone.mat.material.opacity = 0.4 + Math.sin(t * 2.5) * 0.15
       upgradeZone.mat.material.opacity = 0.4 + Math.sin(t * 2.5 + 1) * 0.15
