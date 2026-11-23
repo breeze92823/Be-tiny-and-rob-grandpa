@@ -29,6 +29,11 @@ let zoomEased = CAMERA.distance
 let rush = 0 // eased 0..1 sprint factor
 let clearance = 1 // 0..1 of the boom the walls allow, eased back out
 
+// Spectating: fn() -> { x, y, z } to follow instead of the local player (null = the player).
+let follow = null
+export function setFollow(fn) {
+  follow = fn
+}
 export const getYaw = () => state.yaw
 export const getPitch = () => state.pitch
 
@@ -60,11 +65,12 @@ export function update(camera, dt) {
   state.pitch += inputState.look.dy * CAMERA.lookSensitivity * sensitivity
   inputState.look.dx = 0
   inputState.look.dy = 0
-  const fp = isFirstPerson()
+  const fp = isFirstPerson() && !follow
   state.pitch = fp ? clamp(state.pitch, -CAMERA.firstPersonPitch, CAMERA.firstPersonPitch) : clamp(state.pitch, CAMERA.minPitch, CAMERA.maxPitch)
 
   // Wheel: zoom the boom, or cross between the two modes at its inner end.
-  if (inputState.zoom !== 0) {
+  // (While holding something the wheel / pinch is the hold distance: grab.js reads it.)
+  if (inputState.zoom !== 0 && !inputState.holding) {
     if (fp) {
       if (inputState.zoom > 0) setMode('character')
     } else {
@@ -75,7 +81,7 @@ export function update(camera, dt) {
     inputState.zoom = 0
   }
 
-  const p = player.renderPosition
+  const p = (follow && follow()) || player.renderPosition
   const jump = Math.hypot(p.x - lastPlayerPos.x, p.y - lastPlayerPos.y, p.z - lastPlayerPos.z)
   const teleported = initialised && jump > TELEPORT_DISTANCE
   lastPlayerPos.x = p.x

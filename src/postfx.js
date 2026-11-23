@@ -25,6 +25,11 @@ export function createPostFx(renderer, scene, camera) {
     composer = new EffectComposer(renderer, target)
     composer.addPass(new RenderPass(scene, camera))
     bloom = new UnrealBloomPass(new Vector2(size.x, size.y), BLOOM.strength, BLOOM.radius, BLOOM.threshold)
+    // Cheaper bloom: the pass works at half the screen size (its bright-pass + blur chain starts at a
+    // quarter instead of a half), ~1/4 of the work for a glow that is a touch softer. The result is still
+    // blended over the full-resolution, full-AA frame.
+    const fullSize = bloom.setSize.bind(bloom)
+    bloom.setSize = (w, h) => fullSize(Math.max(2, Math.round(w * BLOOM.scale)), Math.max(2, Math.round(h * BLOOM.scale)))
     composer.addPass(bloom)
     composer.addPass(new OutputPass())
     composer.setPixelRatio(renderer.getPixelRatio())

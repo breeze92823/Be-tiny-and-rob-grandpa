@@ -117,15 +117,17 @@
   height: 44px;
 }
 
-/* Thumb arc in the bottom-right corner: jump biggest and closest to the thumb. */
+/* Thumb arc in the bottom-right corner: jump and grab biggest and closest to the thumb. */
 .touch-cluster {
-  --jump: clamp(72px, 20vmin, 100px);
-  --side: clamp(52px, 14vmin, 70px);
+  --jump: clamp(66px, 18vmin, 92px);
+  --side: clamp(48px, 12.5vmin, 64px);
+  --gap: 10px;
   position: absolute;
   right: calc(var(--safe-r) + var(--pad));
   bottom: calc(var(--safe-b) + var(--pad));
-  width: calc(var(--jump) + var(--side) + 12px);
-  height: calc(var(--jump) + var(--side) + 12px);
+  width: calc(var(--jump) * 2 + var(--side) + var(--gap) * 2);
+  height: calc(var(--jump) + var(--side) * 2 + var(--gap) * 2);
+  pointer-events: none;
 }
 .touch-cluster .touch-btn {
   position: absolute;
@@ -137,15 +139,38 @@
   height: var(--jump);
   font-size: clamp(14px, 3.8vmin, 18px);
 }
+.touch-btn.grab {
+  right: calc(var(--jump) + var(--gap));
+  bottom: calc(var(--jump) * 0.18);
+  width: var(--jump);
+  height: var(--jump);
+  font-size: clamp(14px, 3.8vmin, 18px);
+  background: rgba(255, 178, 30, 0.5);
+}
+.touch-btn.grab.on {
+  background: rgba(255, 178, 30, 0.95);
+}
 .touch-btn.sprint {
-  left: 0;
-  bottom: calc((var(--jump) - var(--side)) / 2);
+  right: calc((var(--jump) - var(--side)) / 2);
+  bottom: calc(var(--jump) + var(--gap));
+  width: var(--side);
+  height: var(--side);
+}
+.touch-btn.throw {
+  right: calc(var(--jump) + var(--gap) + (var(--jump) - var(--side)) / 2);
+  bottom: calc(var(--jump) * 1.18 + var(--gap));
+  width: var(--side);
+  height: var(--side);
+}
+.touch-btn.crouch {
+  right: calc(var(--jump) * 2 + var(--gap) * 2);
+  bottom: 0;
   width: var(--side);
   height: var(--side);
 }
 .touch-btn.mode {
-  top: 0;
   right: calc((var(--jump) - var(--side)) / 2);
+  bottom: calc(var(--jump) + var(--side) + var(--gap) * 2);
   width: var(--side);
   height: var(--side);
 }

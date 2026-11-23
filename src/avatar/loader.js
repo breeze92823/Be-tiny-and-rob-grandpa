@@ -13,6 +13,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import {
   Color,
   FrontSide,
+  Matrix4,
   MeshStandardMaterial,
   NearestFilter,
   NearestMipmapLinearFilter,
@@ -161,7 +162,7 @@ async function applyPart(root, slot, id) {
   target.geometry = geometry
 }
 
-async function applyItem(root, slot, id) {
+async function applyItem(root, slot, id, fit = null) {
   const anchor = root.nodes[slot.attach]
   if (!anchor) return
   const item = await describeItem(id)
@@ -194,7 +195,11 @@ async function applyItem(root, slot, id) {
   })
   // Hats are authored for the portal rig, whose renderer parents them to the
   // head bone lifted 0.8 up; at the bone origin they sink into the head.
-  if (slot.at) object.position.set(...slot.at)
+  const placed = fit && slot.model ? fit(slot) : null
+  if (placed) {
+    // Custom character: the SDK's matrix fits the item to THIS character's head / torso.
+    placed.decompose(object.position, object.quaternion, object.scale)
+  } else if (slot.at) object.position.set(...slot.at)
   else if (slot.key === 'hatId') object.position.set(0, HAT_LIFT, 0)
   anchor.add(object)
 }
@@ -235,6 +240,29 @@ export async function attachEquippedAccessories(root, equipped, { signal, skinTe
   }
 }
 
+// Dresses a custom character (avatar/character.js loadCustomCharacter) with the bone-attached items the
+// player wears. Its body is the uploaded mesh: no skin texture, body parts or proportions. Head / torso items
+// (hats, hair, masks, back, neck, chest, waist) are fitted with the SDK's accessory matrix for this character
+// (`matrixFor(character, bone)` -> 16 numbers | null; older characters get the regular placement). Hand and
+// shoe items need the player.glb rest data the docs describe and are not drawn on custom characters.
+export async function attachCharacterAccessories(root, equipped, character, matrixFor) {
+  if (!root || !equipped) return
+  try {
+    const fit = (slot) => {
+      const m = matrixFor?.(character, slot.attach)
+      if (!m) return null
+      return new Matrix4().fromArray(m).multiply(new Matrix4().makeTranslation(...slot.model))
+    }
+    await Promise.all(
+      AVATAR_SLOTS.filter((slot) => slot.kind === 'item' && isEquipped(equipped[slot.key])).map((slot) =>
+        applyItem(root, slot, equipped[slot.key], fit),
+      ),
+    )
+  } catch (err) {
+    console.warn('[avatarLoader] dressing the custom character failed', err)
+  }
+}
+
 function prop(proportions, key) {
   const spec = PROPORTIONS[key]
   const raw = Number(proportions?.[key])
@@ -246,7 +274,7 @@ function prop(proportions, key) {
 // existing node transforms, no reload needed. A null `proportions` resets to
 // the defaults.
 export function applyProportions(root, proportions) {
-  if (!root) return
+  if (!root || root.userData?.customCharacter) return // a custom character has no proportion sliders
   const n = root.nodes || {}
   const p = {}
   for (const key of Object.keys(PROPORTIONS)) p[key] = prop(proportions, key)

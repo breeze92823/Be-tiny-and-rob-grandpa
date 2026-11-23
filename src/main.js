@@ -1,42 +1,81 @@
+import * as THREE from 'three'
 import { ACESFilmicToneMapping, Clock, Group, PCFSoftShadowMap, PerspectiveCamera, Scene, SRGBColorSpace, WebGLRenderer } from 'three'
-import { CAMERA, graphicsPreset, RENDER } from './config.js'
+import { CAMERA, graphicsPreset, LEADERBOARDS, RENDER } from './config.js'
 import * as bloxity from './bloxity.js'
 import { install as installInput, onKey } from './input.js'
 import { installTouch } from './touch.js'
 import { createPlayerBody, interpolate as interpolatePlayer, player, resetPlayer, respawn } from './player.js'
 import { setCameraSensitivity, syncYawToPlayer, update as updateCamera } from './camera.js'
 import { onModeChanged, toggleMode } from './modes.js'
+import * as physics from './physics.js'
 import { bodyCount, initPhysics, stepPhysics } from './physics.js'
 import { createLighting } from './lighting.js'
-import { buildGround, createWorld, landColliders } from './world.js'
+import { createWorld } from './world.js'
+import { createGame } from './game/game.js'
+import * as netApi from './net.js'
+import { initNet, net, sendEmote, sendPose, syncAvatar } from './net.js'
+import { createRemotePlayers } from './avatar/remotePlayers.js'
+import { setMuted, setVolume, unlock as unlockAudio } from './game/sfx.js'
+import { setMusicVolume } from './game/music.js'
+import { setFpsVisible, tickFps } from './fps.js'
+import { createEmotes } from './avatar/emotes.js'
 import { createPostFx } from './postfx.js'
+import { createFarLights, singlePassFlat } from './perf.js'
 import { setNeonBloom } from './propkit.js'
-import { buildDefaultCharacter, loadBaseCharacter } from './avatar/character.js'
-import { applyProportions, attachEquippedAccessories } from './avatar/loader.js'
+import { buildDefaultCharacter } from './avatar/character.js'
+import { applyProportions } from './avatar/loader.js'
+import { buildLook } from './avatar/look.js'
 import { disposeAnimator, makeAnimator } from './avatar/animator.js'
 
-// Boot order: Bloxity SDK -> renderer -> Rapier (async wasm) -> ground + sky + lighting,
-// player body -> avatar (async, swaps in when ready) -> loop. The SDK is optional at every step.
+// Boot order: Bloxity SDK -> renderer -> Rapier (async wasm) -> sky + lighting, the game (house, yard,
+// hideout, Grandpa, HUD), player body -> avatar (async, swaps in when ready) -> loop. The SDK is
+// optional at every step.
 let lighting = null
 let renderer = null
 let postfx = null
+let game = null
 
 // Settings come from the portal's settings menu (or their defaults offline).
 function applySetting(key, value) {
   if (key === 'camera_sensitivity') setCameraSensitivity(value)
+  else if (key === 'master_volume') setVolume(value / 100)
+  else if (key === 'music_volume') setMusicVolume(value / 100)
+  else if (key === 'show_fps') setFpsVisible(value)
   else if (key === 'fullscreen') bloxity.requestFullscreen(value)
   else if (key === 'graphics_quality' && renderer) {
     const next = graphicsPreset(value)
+    quality = next
     renderer.shadowMap.enabled = next.shadows
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, next.dpr))
     lighting?.setShadows(next)
-    postfx?.configure(next)
-    setNeonBloom(next.bloom)
-    postfx?.setSize(window.innerWidth, window.innerHeight)
+    applyGlow()
+    game?.setDensity(next.particles)
   }
+}
+
+// Light Effects (the in-game Settings window): off drops the bloom glow and hides every point light
+// (room lamps, fireplace, TV, candle, lobby fill), leaving just the sun, sky fill and environment light.
+let quality = null // the graphicsPreset() in use
+let lightEffects = true
+function applyGlow() {
+  if (!postfx || !quality) return
+  const bloom = quality.bloom && lightEffects
+  postfx.configure({ ...quality, bloom })
+  setNeonBloom(bloom)
+  postfx.setSize(window.innerWidth, window.innerHeight)
+}
+function setLightEffects(on) {
+  on = on !== false
+  if (on === lightEffects) return
+  lightEffects = on
+  applyGlow()
+  scene.traverse((o) => {
+    if ((o.isPointLight || o.isSpotLight) && !o.userData.farCull) o.visible = on // far-culled ones: farLights
+  })
 }
 bloxity.onSetting(applySetting)
 bloxity.init()
+bloxity.defineLeaderboards?.(LEADERBOARDS)
 
 // --- Renderer ---------------------------------------------------------------
 const preset = graphicsPreset(bloxity.settings.graphics_quality)
@@ -48,12 +87,19 @@ renderer.shadowMap.enabled = preset.shadows
 renderer.shadowMap.type = PCFSoftShadowMap
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, preset.dpr))
 document.body.appendChild(renderer.domElement)
-installInput(() => bloxity.showMenu(), renderer.domElement) // Esc opens the portal menu
+// Esc closes a panel, else opens the portal menu.
+installInput(() => (game?.panelOpen ? game.hud.closePanel() : bloxity.showMenu()), renderer.domElement)
+
+// Audio starts on the first gesture (browsers require one).
+const unlock = () => unlockAudio()
+window.addEventListener('pointerdown', unlock, { capture: true })
+window.addEventListener('keydown', unlock, { capture: true })
 
 const scene = new Scene()
 const camera = new PerspectiveCamera(CAMERA.fov, 1, CAMERA.near, CAMERA.far)
 postfx = createPostFx(renderer, scene, camera)
-postfx.configure(preset)
+quality = preset
+applyGlow()
 
 function resize() {
   renderer.setSize(window.innerWidth, window.innerHeight)
@@ -66,21 +112,22 @@ resize()
 
 for (const key of Object.keys(bloxity.settings)) applySetting(key, bloxity.settings[key])
 
-// --- Physics + ground + sky --------------------------------------------------
+// --- Physics + world -----------------------------------------------------------
 bloxity.loadingStep('Starting physics')
 await initPhysics()
 
 lighting = createLighting(scene, renderer, preset)
-const world = createWorld(scene) // the sea and clouds
-buildGround(scene)
-landColliders()
+lighting.sun.shadow.camera.layers.enable(1) // hidden outdoor scenery still casts (game/roomCull.js)
+const world = createWorld(scene)
+bloxity.loadingStep("Building Grandpa's house")
+game = createGame({ scene, camera, renderer, preset, setLightEffects })
+initNet(game) // loads / mirrors the saved progress through the game server (offline-safe)
+const farLights = createFarLights(scene)
+singlePassFlat(scene)
 createPlayerBody()
 syncYawToPlayer()
 
 // --- Player avatar ----------------------------------------------------------
-// The Bloxity base rig (player.glb; procedural fallback if it fails), dressed
-// with the signed-in player's equipped cosmetics and body proportions. It
-// rebuilds on customizer edits and sign-in/out.
 const playerGroup = new Group()
 scene.add(playerGroup)
 let avatar = null
@@ -88,27 +135,56 @@ let animator = null
 let generation = 0
 let avatarReady = false
 
+const emotes = createEmotes()
+emotes.onChange(sendEmote)
+const remotes = createRemotePlayers(scene)
+
 function setAvatar(next) {
   if (avatar) playerGroup.remove(avatar)
   disposeAnimator(animator)
   avatar = next
   playerGroup.add(avatar)
   animator = makeAnimator(avatar)
+  emotes.setAvatar(avatar, animator)
 }
 
-setAvatar(buildDefaultCharacter()) // visible immediately; replaced once the rig loads
+// --- Chat bubbles -------------------------------------------------------------
+let bubble = null
+let bubbleTimer = 0
+bloxity.onChat((m) => {
+  if (!m) return
+  if (!m.isLocalPlayer) return void remotes.say(m.userId, bloxity.bubbleText(m))
+  if (!avatar) return
+  bubble?.remove?.()
+  clearTimeout(bubbleTimer)
+  bubble = bloxity.attachBubble(THREE, playerGroup, bloxity.bubbleText(m))
+  bubbleTimer = setTimeout(() => {
+    bubble?.remove?.()
+    bubble = null
+  }, bloxity.chatBubbleSeconds() * 1000)
+})
+
+// --- Ad breaks ----------------------------------------------------------------------
+let adPaused = false
+bloxity.onAdBreak((on) => {
+  adPaused = on
+  setMuted(on)
+})
+
+setAvatar(buildDefaultCharacter())
 
 async function loadAvatar() {
-  // The SDK fires twice per change (optimistic + confirmed); only the newest load may land.
   const mine = ++generation
   try {
-    const group = await loadBaseCharacter()
+    const signed = !!bloxity.authState.user
+    const group = await buildLook({
+      equipped: signed ? bloxity.getEquippedAvatar() : null,
+      proportions: signed ? bloxity.getProportions() : null,
+      local: signed,
+    })
     if (mine !== generation) return
-    const equipped = bloxity.authState.user ? bloxity.getEquippedAvatar() : null
-    await attachEquippedAccessories(group, equipped, { skinTextureUrl: bloxity.getSkinTextureUrl() })
-    if (mine !== generation) return
-    applyProportions(group, bloxity.authState.user ? bloxity.getProportions() : null)
     setAvatar(group)
+    syncAvatar()
   } finally {
     if (mine === generation) avatarReady = true
   }
@@ -119,50 +195,79 @@ bloxity.subscribeAuth((s) => {
   const now = !!s.user
   if (now !== signedIn) {
     signedIn = now
-    loadAvatar() // also runs once at start to swap in the real rig
+    loadAvatar()
   }
 })
 bloxity.onAvatarChanged(loadAvatar)
-bloxity.onProportionsChanged(() => applyProportions(avatar, bloxity.getProportions()))
-bloxity.onRespawnRequest(respawn)
+bloxity.onProportionsChanged(() => {
+  applyProportions(avatar, bloxity.getProportions())
+  syncAvatar()
+})
+bloxity.onRespawnRequest(() => (game.canRespawn() ? respawn() : game.portalRespawn()))
 
 // --- Modes + keys --------------------------------------------------------------
+let firstPerson = false
 onModeChanged((mode) => {
-  playerGroup.visible = mode !== 'player' // first person: you are the camera
+  firstPerson = mode === 'player'
 })
 onKey('KeyV', toggleMode)
 onKey('KeyN', () => lighting.toggleDayNight())
-onKey('KeyR', respawn)
-installTouch({ mode: toggleMode, day: () => lighting.toggleDayNight(), respawn })
+onKey('KeyR', () => game.canRespawn() && respawn())
+installTouch({ mode: toggleMode, day: () => lighting.toggleDayNight(), respawn: () => game.canRespawn() && respawn() })
 
 // --- Loop -------------------------------------------------------------------
 const clock = new Clock()
 let shownLoading = true
 let readySince = 0
 
+let simTime = 0
+let flatCheck = 2
 renderer.setAnimationLoop(() => {
-  const dt = Math.min(clock.getDelta(), 0.1) // clamp huge frames (tab switch, breakpoint)
-  const elapsed = clock.elapsedTime
+  const dt = Math.min(clock.getDelta(), 0.1)
+  simTime += dt
+  frame(dt, simTime)
+})
 
-  stepPhysics(dt) // runs the player controller + world at the fixed rate, interpolates bodies
+function frame(dt, elapsed, render = true) {
+  tickFps(dt)
+  if (adPaused) {
+    if (render) postfx.render()
+    return
+  }
+
+  stepPhysics(dt)
   interpolatePlayer()
 
   const p = player.renderPosition
   playerGroup.position.set(p.x, p.y, p.z)
   playerGroup.rotation.y = player.facing
+  playerGroup.visible = !firstPerson && !(game.bodyState().out && game.inHeist)
+  const speed = Math.hypot(player.velocity.x, player.velocity.z)
   animator?.update(dt, {
-    grounded: player.grounded,
-    speed: Math.hypot(player.velocity.x, player.velocity.z),
-    verticalVelocity: player.velocity.y,
+    grounded: player.grounded || game.bodyState().held,
+    speed: game.bodyState().held ? 0 : speed,
+    verticalVelocity: game.bodyState().held ? 0 : player.velocity.y,
     turn: 0,
   })
+  emotes.update(dt, speed, player.grounded)
+  game.animate(animator, avatar, emotes.playing, elapsed)
+  sendPose(player, speed, game.bodyState())
+  remotes.update(dt, net.players, net.sessionId, player.position, game.zone)
 
   updateCamera(camera, dt)
+  game.update(dt, elapsed)
+  game.fx.applyShake(dt)
   world.update(dt, elapsed)
-  lighting.update(dt, playerGroup.position)
-  postfx.render()
+  lighting.update(dt, p)
+  farLights.update(camera, scene.fog?.far ?? Infinity, lightEffects)
+  // late arrivals (loot glass, FX rings, gadgets): re-check now and then
+  flatCheck -= dt
+  if (flatCheck <= 0) {
+    flatCheck = 2
+    singlePassFlat(scene)
+  }
+  if (render) postfx.render()
 
-  // Loading ends once the scene has drawn and the avatar has had its chance (max ~5 s).
   if (shownLoading) {
     readySince += dt
     if (avatarReady || readySince > 5) {
@@ -170,15 +275,23 @@ renderer.setAnimationLoop(() => {
       bloxity.notifyFirstFrame()
     }
   }
-})
+}
 
 window.addEventListener('beforeunload', bloxity.teardown)
 
-// Dev-only console hook, e.g. __game.teleport(-24, 0, 6, Math.PI / 2)
+// Dev-only console hook, e.g. __game.teleport(0, 0, 60) / __game.game.debug.start('normal')
 if (import.meta.env.DEV) {
   const teleport = (x, y, z, facing = player.facing) => {
     resetPlayer({ x, y, z }, facing)
     syncYawToPlayer()
   }
-  window.__game = { player, scene, renderer, camera, postfx, bodies: bodyCount, toggleMode, teleport }
+  // advance(seconds): run frames synchronously at 60 fps (tests; the pane throttles rAF when hidden)
+  const advance = (seconds) => {
+    const n = Math.round(seconds * 60)
+    for (let i = 0; i < n; i++) {
+      simTime += 1 / 60
+      frame(1 / 60, simTime, i === n - 1)
+    }
+  }
+  window.__game = { player, scene, renderer, camera, postfx, bodies: bodyCount, toggleMode, teleport, game, physics, emotes, remotes, advance, net: netApi }
 }

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Models Test</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&display=swap" rel="stylesheet" />
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #cfd8e3; font-family: Fredoka, system-ui, sans-serif; }
+      canvas { display: block; touch-action: none; }
+      #info { position: fixed; top: max(10px, env(safe-area-inset-top)); left: 10px; max-width: min(420px, 80vw); padding: 10px 12px;
+        background: rgba(20, 24, 36, 0.78); color: #f3f5fa; border-radius: 12px; font-size: 13px; line-height: 1.4; pointer-events: auto; }
+      #info b { color: #ffd23a; }
+      #info .bad { color: #ff7a7a; }
+      #info .ok { color: #7dff8a; }
+      #strip { position: fixed; left: 0; right: 0; bottom: 0; display: flex; gap: 6px; overflow-x: auto; padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
+        background: rgba(20, 24, 36, 0.72); }
+      #strip figure { margin: 0; flex: 0 0 auto; width: 72px; text-align: center; color: #e6e9f2; font-size: 10px; cursor: pointer; }
+      #strip img { width: 64px; height: 64px; display: block; margin: 0 auto 2px; background: rgba(255, 255, 255, 0.07); border-radius: 10px; }
+      .lbl { font-size: 11px; color: #1d2230; background: rgba(255, 255, 255, 0.82); padding: 1px 6px; border-radius: 8px; white-space: nowrap; pointer-events: none; }
+      .lbl i { color: #6a7184; font-style: normal; }
+      .row { font-size: 16px; font-weight: 700; color: #fff; background: #3b5bdb; padding: 2px 10px; border-radius: 10px; pointer-events: none; }
+    </style>
+  </head>
+  <body>
+    <div id="info">Loading models...</div>
+    <div id="strip"></div>
+    <script type="module" src="./src/game/models/modelsTest.js"></script>
+  </body>
+</html>
