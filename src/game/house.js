@@ -1169,8 +1169,10 @@ export function buildNav() {
     g1: [-36, 9], g2: [-46, 12], g3: [-46, 26], g4: [-24, 12], g5: [-24, 34],
     // living
     l1: [0, 10], l2: [-8, 13], l3: [10, 14], l4: [12, 25], l5: [-4, 32], l6: [24, 20], l7: [8, 36],
-    // secret door + study
-    dS: [30, 20], s1: [38, 20], s2: [44, 30],
+    // secret door + study: the open bookshelf swings into the study from its hinge (30.6, 16) out to
+    // about (38, 18..21.4), so the way through keeps to the free north part of the doorway (z 19.5..24)
+    // and passes north of the shelf's tip; s3 / s4 lead round that tip to the desk end behind it
+    dS: [30, 21.9], s1: [39.5, 25.5], s2: [44, 30], s3: [43, 21], s4: [41, 15],
     // the back door + the back yard (only while he runs from a fire: flag 'outside')
     dX: [-38, -42], y1: [-38, -52], y2: [-38, -66],
   }
@@ -1182,6 +1184,7 @@ export function buildNav() {
     ['h2', 'dG'], ['h1', 'dG'], ['dG', 'g1'], ['g1', 'g2'], ['g2', 'g3'], ['g1', 'g4'], ['g4', 'g5'],
     ['h4', 'dL'], ['h3', 'dL'], ['h5', 'dL'], ['dL', 'l1'], ['l1', 'l2'], ['l1', 'l3'], ['l3', 'l4'], ['l2', 'l5'], ['l4', 'l7'], ['l5', 'l7'], ['l3', 'l6'], ['l4', 'l6'],
     ['l6', 'dS', 'secret'], ['dS', 's1', 'secret'], ['s1', 's2', 'secret'],
+    ['s1', 's3', 'secret'], ['s2', 's3', 'secret'], ['s3', 's4', 'secret'],
     ['k3', 'dX', 'outside'], ['k2', 'dX', 'outside'], ['dX', 'y1', 'outside'], ['y1', 'y2', 'outside'],
   ]
   const OUT = new Set(['dX', 'y1', 'y2'])

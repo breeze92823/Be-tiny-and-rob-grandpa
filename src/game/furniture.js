@@ -1114,8 +1114,51 @@ function buildSecretShelf(g, live, m, switches) {
       target = 1.3
       book.rotation.z = 0.35
     },
+    // Does the floor segment a -> b pass within `pad` of the swung-open shelf? (Grandpa's straight-line
+    // checks only see static colliders; the shelf is kinematic.) The leaf is the box x -3.4..0, z 0..8 in
+    // its own frame (hinge at the origin, turned by `angle` like the mesh), so the segment is taken there.
+    blocks(ax, az, bx, bz, pad = 0) {
+      if (angle < 0.01) return false
+      const c = Math.cos(angle)
+      const s = Math.sin(angle)
+      const local = (x, z) => {
+        const dx = x - hingeP.x
+        const dz = z - hingeP.z
+        return [dx * c - dz * s, dx * s + dz * c]
+      }
+      const [lax, laz] = local(ax, az)
+      const [lbx, lbz] = local(bx, bz)
+      return segBoxDist2D(lax, laz, lbx, lbz, -3.4, 0, 0, 8) < pad
+    },
   }
   return secret
+}
+
+// Shortest distance between floor segment a-b and the box x0..x1, z0..z1 (0 when it touches / enters).
+function segBoxDist2D(ax, az, bx, bz, x0, z0, x1, z1) {
+  const inside = (x, z) => x >= x0 && x <= x1 && z >= z0 && z <= z1
+  if (inside(ax, az) || inside(bx, bz)) return 0
+  const edges = [[x0, z0, x1, z0], [x1, z0, x1, z1], [x1, z1, x0, z1], [x0, z1, x0, z0]]
+  let best = Infinity
+  for (const [px, pz, qx, qz] of edges) best = Math.min(best, segDist2D(ax, az, bx, bz, px, pz, qx, qz))
+  return best
+}
+// Shortest distance between floor segments a-b and p-q (0 when they cross).
+function segDist2D(ax, az, bx, bz, px, pz, qx, qz) {
+  const cross = (ux, uz, vx, vz) => ux * vz - uz * vx
+  const d1 = cross(bx - ax, bz - az, px - ax, pz - az)
+  const d2 = cross(bx - ax, bz - az, qx - ax, qz - az)
+  const d3 = cross(qx - px, qz - pz, ax - px, az - pz)
+  const d4 = cross(qx - px, qz - pz, bx - px, bz - pz)
+  if (d1 * d2 < 0 && d3 * d4 < 0) return 0
+  const toSeg = (x, z, sx, sz, ex, ez) => {
+    const dx = ex - sx
+    const dz = ez - sz
+    const l2 = dx * dx + dz * dz
+    const t = l2 > 0 ? Math.max(0, Math.min(1, ((x - sx) * dx + (z - sz) * dz) / l2)) : 0
+    return Math.hypot(x - sx - dx * t, z - sz - dz * t)
+  }
+  return Math.min(toSeg(ax, az, px, pz, qx, qz), toSeg(bx, bz, px, pz, qx, qz), toSeg(px, pz, ax, az, bx, bz), toSeg(qx, qz, ax, az, bx, bz))
 }
 
 // The bird cage (living room corner): a ring of bars, a dome, and a hinged door that Grandpa locks.
